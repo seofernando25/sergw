@@ -1,0 +1,21 @@
+[package]
+name = "sergw"
+version = "0.1.0"
+edition = '2021'
+license = "GPL-3.0-or-later"
+description = "Simple Serial to TCP Gateway: bridge a serial port to a TCP server"
+repository = "https://github.com/seofernando25/sergw"
+readme = "README.md"
+keywords = ["serial", "tcp", "gateway", "bridge", "uart"]
+categories = ["command-line-utilities", "hardware-support", "network-programming"]
+rust-version = "1.70"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
+ctrlc = "3"
+serialport = "4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
