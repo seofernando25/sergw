@@ -11,6 +11,10 @@ A small utility that bridges a serial port to a TCP socket. It exposes the seria
 - Backpressure via bounded channels; slow TCP writers are dropped
 - Graceful shutdown on Ctrl-C
 - Structured logs via `tracing`
+- Auto-reconnect for serial port on errors (1s retry)
+- Non-blocking accept and shutdown-aware loops
+- Stable exit codes for common failure modes
+- Machine-readable output for `ports` (`--format json`)
 
 ## Install
 
@@ -34,6 +38,7 @@ cargo install --path . --locked
 sergw ports
 sergw ports --verbose
 sergw ports --all --verbose
+sergw ports --format json
 ```
 
 - Listen (auto-pick serial if only one is present):
@@ -54,7 +59,13 @@ sergw listen --serial /dev/ttyUSB0 --baud 115200 --host 0.0.0.0:5656
 sergw listen --serial /dev/ttyUSB0 --baud 57600 --data-bits eight --parity none --stop-bits one
 ```
 
-Enable logs with `RUST_LOG` (examples):
+- Buffer sizing (messages per channel):
+
+```bash
+sergw listen --buffer 8192
+```
+
+Enable logs with `RUST_LOG` (examples). Logs go to stderr; command outputs (like `ports`) go to stdout:
 
 ```bash
 RUST_LOG=info sergw listen --serial /dev/ttyUSB0
@@ -86,7 +97,7 @@ Key targets:
 
 - No framing or protocol translation: raw bytes are forwarded as-is
 - No authentication or encryption on the TCP side (consider using TLS/SSH)
-- The accept loop currently uses blocking `accept`; a future improvement is to use non-blocking accept to improve shutdown responsiveness
+- Built-in serial auto-reconnect retries every 1s without backoff
 
 ## Systemd (example)
 

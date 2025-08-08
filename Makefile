@@ -33,7 +33,7 @@ test:
 	$(CARGO) test
 
 clippy:
-	$(CARGO) clippy --all-targets -- -D warnings
+	RUSTFLAGS="-D warnings" $(CARGO) clippy --all-targets -- -D warnings
 
 fmt:
 	$(CARGO) fmt --all
@@ -43,11 +43,12 @@ ports:
 	ARGS="ports"; \
 	if [ -n "$(ALL)" ]; then ARGS="$$ARGS --all"; fi; \
 	if [ -n "$(VERBOSE)" ]; then ARGS="$$ARGS --verbose"; fi; \
+	if [ -n "$(FORMAT)" ]; then ARGS="$$ARGS --format $(FORMAT)"; fi; \
 	$(CARGO) run -- $$ARGS
 
 listen:
 	@set -e; \
-	ARGS="listen --baud $(BAUD) --host $(HOST)"; \
+	ARGS="listen --baud $(BAUD) --host $(HOST) --buffer $(BUFFER)"; \
 	if [ -n "$(SERIAL)" ]; then ARGS="$$ARGS --serial $(SERIAL)"; fi; \
 	$(CARGO) run -- $$ARGS
 
