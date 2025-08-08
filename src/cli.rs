@@ -21,6 +21,9 @@ pub enum Commands {
         /// Show detailed metadata
         #[arg(long)]
         verbose: bool,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = PortsFormat::Text)]
+        format: PortsFormat,
     },
     /// Bridge a serial port to TCP
     Listen(Listen),
@@ -51,6 +54,10 @@ pub struct Listen {
     /// Stop bits
     #[arg(long, value_enum, default_value_t = StopBitsOpt::One)]
     pub stop_bits: StopBitsOpt,
+
+    /// Buffer capacity (messages) for internal channels
+    #[arg(long, default_value_t = 4096)]
+    pub buffer: usize,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -100,6 +107,79 @@ impl From<StopBitsOpt> for StopBits {
         match v {
             StopBitsOpt::One => StopBits::One,
             StopBitsOpt::Two => StopBits::Two,
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum PortsFormat {
+    Text,
+    Json,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_listen_defaults() {
+        let cli = Cli::parse_from(["sergw", "listen"]);
+        match cli.command.unwrap() {
+            Commands::Listen(l) => {
+                assert_eq!(l.serial, None);
+                assert_eq!(l.baud, 115_200);
+                assert_eq!(l.host, "127.0.0.1:5656".parse().unwrap());
+                assert!(matches!(l.data_bits, DataBitsOpt::Eight));
+                assert!(matches!(l.parity, ParityOpt::None));
+                assert!(matches!(l.stop_bits, StopBitsOpt::One));
+                assert_eq!(l.buffer, 4096);
+            }
+            _ => panic!("expected listen"),
+        }
+    }
+
+    #[test]
+    fn parse_listen_values() {
+        let cli = Cli::parse_from([
+            "sergw",
+            "listen",
+            "--serial",
+            "/dev/ttyUSB9",
+            "--baud",
+            "57600",
+            "--host",
+            "0.0.0.0:9000",
+            "--data-bits",
+            "seven",
+            "--parity",
+            "even",
+            "--stop-bits",
+            "two",
+            "--buffer",
+            "123",
+        ]);
+        match cli.command.unwrap() {
+            Commands::Listen(l) => {
+                assert_eq!(l.serial.as_deref(), Some("/dev/ttyUSB9"));
+                assert_eq!(l.baud, 57_600);
+                assert_eq!(l.host, "0.0.0.0:9000".parse().unwrap());
+                assert!(matches!(l.data_bits, DataBitsOpt::Seven));
+                assert!(matches!(l.parity, ParityOpt::Even));
+                assert!(matches!(l.stop_bits, StopBitsOpt::Two));
+                assert_eq!(l.buffer, 123);
+            }
+            _ => panic!("expected listen"),
+        }
+    }
+
+    #[test]
+    fn parse_ports_json() {
+        let cli = Cli::parse_from(["sergw", "ports", "--format", "json"]);
+        match cli.command.unwrap() {
+            Commands::Ports { format, .. } => {
+                assert!(matches!(format, PortsFormat::Json));
+            }
+            _ => panic!("expected ports"),
         }
     }
 }

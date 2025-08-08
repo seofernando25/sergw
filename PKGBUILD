@@ -26,12 +26,12 @@ prepare() {
 
 build() {
   cd "${srcdir}/${_pkgname}"
-  cargo build --release
+  cargo build --release --frozen
 }
 
 check() {
   cd "${srcdir}/${_pkgname}"
-  cargo test --release
+  cargo test --release --frozen
 }
 
 package() {

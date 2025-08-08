@@ -1,6 +1,7 @@
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
+use thiserror::Error;
 use serialport::{available_ports, SerialPort, SerialPortBuilder, SerialPortInfo, SerialPortType};
 
 use crate::cli::Listen;
@@ -30,13 +31,18 @@ pub(crate) fn decide_port(explicit: Option<String>, available: Vec<String>) -> R
         return Ok(p);
     }
     match available.len() {
-        0 => bail!("No serial ports found. Re-run with --serial <PORT> or use --all in 'ports' to inspect."),
+        0 => Err(SerialSelectError::NoPorts.into()),
         1 => Ok(available[0].clone()),
-        _ => bail!(
-            "Multiple serial ports detected: {}. Please specify --serial <PORT>.",
-            available.join(", ")
-        ),
+        _ => Err(SerialSelectError::MultiplePorts { list: available }.into()),
     }
+}
+
+#[derive(Debug, Error)]
+pub enum SerialSelectError {
+    #[error("No serial ports found. Re-run with --serial <PORT> or use --all in 'ports' to inspect.")]
+    NoPorts,
+    #[error("Multiple serial ports detected: {list:?}. Please specify --serial <PORT>.")]
+    MultiplePorts { list: Vec<String> },
 }
 
 
@@ -45,7 +51,6 @@ pub fn configure_serial(
     listen: &Listen,
 ) -> serialport::Result<Box<dyn SerialPort>> {
     builder
-        .baud_rate(listen.baud)
         .data_bits(listen.data_bits.clone().into())
         .parity(listen.parity.clone().into())
         .stop_bits(listen.stop_bits.clone().into())
