@@ -13,6 +13,7 @@ use tracing::{error, info, warn};
 use crate::cli::Listen;
 use crate::serial::{configure_serial, select_serial_port};
 use crate::state::SharedState;
+use crate::tui::{run_tui, Counters};
 
 pub fn run_listen(listen: Listen) -> Result<()> {
     let stop_flag = Arc::new(AtomicBool::new(false));
@@ -39,18 +40,35 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
 
     // - shared state for broadcasting serial -> TCP
     let shared_state = Arc::new(SharedState::new());
+    let counters = Arc::new(Counters::default());
+    let (event_tx_base, event_rx) = channel::unbounded::<String>();
+    let event_tx = if listen.ui { Some(event_tx_base) } else { None };
+
+    // TUI thread
+    let tui_handle = if listen.ui {
+        let shared_for_tui = Arc::clone(&shared_state);
+        let counters_for_tui = Arc::clone(&counters);
+        let stop_for_tui = stop_flag.clone();
+        Some(thread::spawn(move || {
+            let _ = run_tui(shared_for_tui, counters_for_tui, event_rx, stop_for_tui);
+        }))
+    } else {
+        None
+    };
 
     // Serial reader thread: serial -> broadcast
     let shared_state_for_reader = Arc::clone(&shared_state);
     let stop_reader = stop_flag.clone();
     let serial_path_for_reader = serial_path.clone();
     let listen_for_reader = listen.clone();
+    let counters_reader = Arc::clone(&counters);
     let serial_reader = thread::spawn(move || -> Result<()> {
         let mut buffer = vec![0u8; 4096];
         loop {
             while !stop_reader.load(Ordering::Relaxed) {
                 match serial_port.read(&mut buffer) {
                     Ok(n) if n > 0 => {
+                        counters_reader.bytes_out.fetch_add(n as u64, Ordering::Relaxed);
                         let bytes = Bytes::copy_from_slice(&buffer[..n]);
                         shared_state_for_reader.broadcast(bytes);
                     }
@@ -153,6 +171,9 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
             warn!(?e, %addr, "Failed to set TCP_NODELAY on writer");
         }
         info!(%addr, "Accepted connection");
+        if let Some(tx) = &event_tx {
+            let _ = tx.send(format!("Connected: {addr}"));
+        }
 
         let to_serial_tx_conn = to_serial_tx.clone();
         let (to_tcp_tx, to_tcp_rx) = channel::bounded::<Bytes>(listen.buffer);
@@ -163,12 +184,14 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
         // TCP reader: TCP -> to_serial
         let stop_conn = stop_flag.clone();
         let reader_addr = addr;
+        let counters_in = Arc::clone(&counters);
         let tcp_reader = thread::spawn(move || -> Result<()> {
             let mut buffer = [0u8; 4096];
             while !stop_conn.load(Ordering::Relaxed) {
                 match stream_reader.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(n) => {
+                        counters_in.bytes_in.fetch_add(n as u64, Ordering::Relaxed);
                         let buf = Bytes::copy_from_slice(&buffer[..n]);
                         if let Err(e) = to_serial_tx_conn.send(buf) {
                             warn!(?e, "Dropping data to serial, backpressure or shutdown");
@@ -206,10 +229,14 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
 
         // Detach a supervisor for the connection
         let shared_state_remove = Arc::clone(&shared_state);
+        let event_tx_conn = event_tx.clone();
         thread::spawn(move || {
             let _ = tcp_reader.join();
             let _ = tcp_writer.join();
             shared_state_remove.remove(&addr);
+            if let Some(tx) = event_tx_conn {
+                let _ = tx.send(format!("Disconnected: {addr}"));
+            }
             info!(%addr, "Closed connection");
         });
     }
@@ -223,6 +250,10 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
         warn!(?e, "Serial writer error on shutdown");
     }
     shared_state.dispose();
+
+    if let Some(handle) = tui_handle {
+        let _ = handle.join();
+    }
 
     Ok(())
 }
@@ -272,6 +303,7 @@ mod itests {
             parity: crate::cli::ParityOpt::None,
             stop_bits: crate::cli::StopBitsOpt::One,
             buffer,
+            ui: false,
         };
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = stop.clone();

@@ -2,6 +2,7 @@ mod cli;
 mod serial;
 mod server;
 mod state;
+mod tui;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
