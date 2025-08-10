@@ -102,7 +102,7 @@ pub fn run_mock_chat_with_title(master: OwnedFd, title: String) -> Result<()> {
                 ])
                 .split(f.size());
 
-            let header = Paragraph::new(format!("{} | In: {} B/s Out: {} B/s", title, inbound, outbound));
+            let header = Paragraph::new(format!("{title} | In: {inbound} B/s Out: {outbound} B/s"));
             f.render_widget(header, chunks[0]);
 
             // Auto-scroll: render only the last lines that fit
@@ -129,7 +129,7 @@ pub fn run_mock_chat_with_title(master: OwnedFd, title: String) -> Result<()> {
                             to_send.push('\n');
                             let _ = master_file.write_all(to_send.as_bytes());
                             tx_bytes.fetch_add(to_send.len() as u64, Ordering::Relaxed);
-                            let _ = log_tx.send(format!("> {}", input));
+                            let _ = log_tx.send(format!("> {input}"));
                             input.clear();
                         }
                     }

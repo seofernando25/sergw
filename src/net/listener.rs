@@ -168,7 +168,7 @@ pub fn run_chat(chat: Chat) -> Result<()> {
                                     let new_s = connect(chat.host);
                                     if let Ok(mut gg) = stream.lock() { *gg = new_s; }
                                 }
-                                wrote = try_send(&mut *g, to_send.as_bytes());
+                                wrote = try_send(&mut g, to_send.as_bytes());
                                 if !wrote {
                                     let _ = log_tx.send("! write error: Broken pipe".to_string());
                                 }
@@ -178,14 +178,14 @@ pub fn run_chat(chat: Chat) -> Result<()> {
                                 let new_s = connect(chat.host);
                                 if let Ok(mut g) = stream.lock() { *g = new_s; }
                                 if let Ok(mut g) = stream.lock() {
-                                    if let Some(prev) = &last_sent { let _ = try_send(&mut *g, prev.as_slice()); }
+                                    if let Some(prev) = &last_sent { let _ = try_send(&mut g, prev.as_slice()); }
                                     std::thread::sleep(Duration::from_millis(150));
-                                    wrote = try_send(&mut *g, to_send.as_bytes());
+                                    wrote = try_send(&mut g, to_send.as_bytes());
                                 }
                             }
                             if wrote {
                                 tx_bytes.fetch_add(to_send.len() as u64, Ordering::Relaxed);
-                                let _ = log_tx.send(format!("> {}", input));
+                                let _ = log_tx.send(format!("> {input}"));
                                 last_sent = Some(to_send.as_bytes().to_vec());
                             }
                             input.clear();

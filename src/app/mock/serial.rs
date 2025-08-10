@@ -22,7 +22,7 @@ pub fn run_mock_serial() -> Result<()> {
     }
     let _guard = SymlinkGuard(alias_path);
 
-    run_mock_chat_with_title(master, format!("mock serial | {}", alias_path))?;
+    run_mock_chat_with_title(master, format!("mock serial | {alias_path}"))?;
     Ok(())
 }
 

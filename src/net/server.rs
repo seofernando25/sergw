@@ -15,6 +15,8 @@ use crate::serial::{configure_serial, select_serial_port};
 use crate::state::SharedState;
 use crate::ui::overview::{run_tui, Counters};
 use crate::ui::inspector::{DirectionTag, Sample};
+#[cfg(feature = "mdns")]
+use libmdns as _mdns;
 
 pub fn run_listen(listen: Listen) -> Result<()> {
     let stop_flag = Arc::new(AtomicBool::new(false));
@@ -113,7 +115,7 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
                     }
                     Ok(_) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
-                    Err(_) if std::io::ErrorKind::BrokenPipe == std::io::ErrorKind::BrokenPipe => {
+                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
                         // Quiet console; send to UI
                         let _ = status_tx_reader.send("Serial: disconnected, attempting reconnect...".into());
                         break;
@@ -191,6 +193,34 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
     listener
         .set_nonblocking(true)
         .context("Setting TCP listener non-blocking mode")?;
+
+    // mDNS/Bonjour advertisement (zero-config), optional via feature flag
+    #[cfg(feature = "mdns")]
+    let _mdns_guard: Option<(_mdns::Responder, _mdns::Service)> = {
+        // Derive a friendly instance name from the serial device
+        let instance = serial_path
+            .rsplit('/')
+            .next()
+            .map(|s| format!("sergw:{s}"))
+            .unwrap_or_else(|| "sergw".to_string());
+        match _mdns::Responder::new() {
+            Ok(responder) => {
+                let port = listen.host.port();
+                let txt: [&str; 1] = ["provider=sergw"];
+                let service = responder.register(
+                    "_sergw._tcp".to_string(),
+                    instance,
+                    port,
+                    &txt,
+                );
+                Some((responder, service))
+            }
+            Err(e) => {
+                warn!(error = ?e, "mDNS responder init failed; continuing without mDNS");
+                None
+            }
+        }
+    };
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
