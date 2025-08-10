@@ -23,6 +23,11 @@ fn create_pty_pair() -> Result<(OwnedFd, OwnedFd, String)> {
 #[cfg(target_os = "linux")]
 pub fn run_mock_serial() -> Result<()> {
     let (master, _slave_fd, slave_path) = create_pty_pair()?;
+    // If user requested an alias symlink, create it (best effort)
+    if let Ok(alias) = std::env::var("SERGW_PTY_ALIAS") {
+        let _ = std::fs::remove_file(&alias);
+        let _ = std::os::unix::fs::symlink(&slave_path, &alias);
+    }
     // Show compact one-line header inside the UI
     super::tui_chat_mock::run_mock_chat_with_title(master, format!("mock serial | {}", slave_path))?;
 

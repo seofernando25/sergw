@@ -1,29 +1,38 @@
+#[cfg(target_os = "linux")]
 use std::fs::File;
+#[cfg(target_os = "linux")]
 use std::io::{Read, Write};
+#[cfg(target_os = "linux")]
 use std::os::unix::io::OwnedFd;
+#[cfg(target_os = "linux")]
 use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "linux")]
 use anyhow::Result;
+#[cfg(target_os = "linux")]
 use crossbeam_channel as channel;
+#[cfg(target_os = "linux")]
 use crossterm::{
     event::{self, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+#[cfg(target_os = "linux")]
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Paragraph, Wrap},
+    text::{Line, Span},
     Terminal,
 };
-
+#[cfg(target_os = "linux")]
 use crate::metrics::ThroughputAverager;
 
+#[cfg(target_os = "linux")]
 pub fn run_mock_chat_with_title(master: OwnedFd, title: String) -> Result<()> {
     let mut master_file: File = master.into();
-    // nonblocking not strictly necessary; we poll and redraw
-    // master_file.set_nonblocking(true).ok();
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -99,9 +108,9 @@ pub fn run_mock_chat_with_title(master: OwnedFd, title: String) -> Result<()> {
             // Auto-scroll: render only the last lines that fit
             let viewport = chunks[1].height.saturating_sub(2) as usize; // minus borders
             let start = logs.len().saturating_sub(viewport);
-            let items: Vec<ListItem> = logs.iter().skip(start).map(|l| ListItem::new(l.clone())).collect();
-            let list = List::new(items).block(Block::default().title("Messages").borders(Borders::ALL));
-            f.render_widget(list, chunks[1]);
+            let lines: Vec<Line> = logs.iter().skip(start).map(|l| Line::from(Span::raw(l.clone()))).collect();
+            let para = Paragraph::new(lines).wrap(Wrap { trim: false }).block(Block::default().title("Messages").borders(Borders::ALL));
+            f.render_widget(para, chunks[1]);
 
             let input_box = Paragraph::new(input.clone())
                 .block(Block::default().title("Input (Enter to send, Ctrl+C to quit)").borders(Borders::ALL));
