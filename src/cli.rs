@@ -27,6 +27,13 @@ pub enum Commands {
     },
     /// Bridge a serial port to TCP
     Listen(Listen),
+
+    #[cfg(target_os = "linux")]
+    /// Mock utilities
+    Mock {
+        #[command(subcommand)]
+        cmd: MockCmd,
+    },
 }
 
 #[derive(Parser, Clone, Debug)]
@@ -62,6 +69,25 @@ pub struct Listen {
     /// Launch terminal user interface
     #[arg(long)]
     pub ui: bool,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Subcommand, Clone, Debug)]
+pub enum MockCmd {
+    /// Create a PTY-backed serial device and open a chat UI bound to it
+    Serial,
+    /// Open a chat UI connected to a TCP server (replaces `socat - TCP:host:port`)
+    Listener {
+        #[command(flatten)]
+        chat: Chat,
+    },
+}
+
+#[derive(Parser, Clone, Debug)]
+pub struct Chat {
+    /// TCP server to connect to (e.g. 127.0.0.1:5656)
+    #[arg(long, default_value = "127.0.0.1:5656")]
+    pub host: std::net::SocketAddr,
 }
 
 #[derive(ValueEnum, Clone, Debug)]

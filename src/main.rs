@@ -3,6 +3,11 @@ mod serial;
 mod server;
 mod state;
 mod tui;
+mod tui_chat;
+mod tui_chat_mock;
+mod metrics;
+#[cfg(target_os = "linux")]
+mod mock;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
@@ -90,6 +95,11 @@ fn main() {
             Ok(())
         }
         Some(Commands::Listen(listen)) => run_listen(listen),
+        #[cfg(target_os = "linux")]
+        Some(Commands::Mock { cmd: sub }) => match sub {
+            crate::cli::MockCmd::Serial => crate::mock::run_mock_serial(),
+            crate::cli::MockCmd::Listener { chat } => crate::tui_chat::run_chat(chat),
+        },
         None => {
             Cli::command().print_help().ok();
             println!();

@@ -30,3 +30,6 @@ ratatui = "0.26"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 nix = { version = "0.28", features = ["term"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.28", features = ["term"] }

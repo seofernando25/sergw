@@ -16,6 +16,7 @@ use ratatui::{
 };
 
 use crate::state::SharedState;
+use crate::metrics::ThroughputAverager;
 
 #[derive(Default)]
 pub struct Counters {
@@ -38,6 +39,8 @@ pub fn run_tui(
     let mut logs: Vec<String> = Vec::new();
     let mut last_in = 0u64;
     let mut last_out = 0u64;
+    let mut avg_in = ThroughputAverager::new(5.0);
+    let mut avg_out = ThroughputAverager::new(5.0);
     let mut last_time = Instant::now();
 
     while !stop.load(Ordering::Relaxed) {
@@ -52,8 +55,8 @@ pub fn run_tui(
         let dt = now.duration_since(last_time).as_secs_f64().max(0.001);
         let bi = counters.bytes_in.load(Ordering::Relaxed);
         let bo = counters.bytes_out.load(Ordering::Relaxed);
-        let tin = ((bi - last_in) as f64 / dt) as u64;
-        let tout = ((bo - last_out) as f64 / dt) as u64;
+        let tin = avg_out.update(bi - last_in, dt) as u64;   // TCP -> serial (outbound, smoothed)
+        let tout = avg_in.update(bo - last_out, dt) as u64; // serial -> TCP (inbound, smoothed)
         last_in = bi;
         last_out = bo;
         last_time = now;
@@ -61,7 +64,7 @@ pub fn run_tui(
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(5), Constraint::Length(3), Constraint::Min(0)].as_ref())
+                .constraints([Constraint::Length(5), Constraint::Length(4), Constraint::Min(0)].as_ref())
                 .split(f.size());
 
             // Active connections
@@ -74,12 +77,15 @@ pub fn run_tui(
             f.render_widget(list, chunks[0]);
 
             // Throughput
-            let throughput = Paragraph::new(format!("In: {tin} B/s\nOut: {tout} B/s"))
+            // Show inbound (from serial) and outbound (to serial)
+            let throughput = Paragraph::new(format!("Inbound: {tout} B/s\nOutbound: {tin} B/s"))
                 .block(Block::default().title("Throughput").borders(Borders::ALL));
             f.render_widget(throughput, chunks[1]);
 
-            // Logs
-            let log_items: Vec<ListItem> = logs.iter().rev().map(|l| ListItem::new(l.clone())).collect();
+            // Logs (auto-scroll: show last lines that fit, top-to-bottom)
+            let viewport = chunks[2].height.saturating_sub(2) as usize; // minus borders
+            let start = logs.len().saturating_sub(viewport);
+            let log_items: Vec<ListItem> = logs.iter().skip(start).map(|l| ListItem::new(l.clone())).collect();
             let log_list = List::new(log_items).block(Block::default().title("Events").borders(Borders::ALL));
             f.render_widget(log_list, chunks[2]);
         })?;

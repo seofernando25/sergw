@@ -56,6 +56,30 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
         None
     };
 
+    // Metrics reporter (always on; logs to info every 5 seconds)
+    {
+        let counters_for_metrics = Arc::clone(&counters);
+        let stop_for_metrics = stop_flag.clone();
+        std::thread::spawn(move || {
+            let mut last_in: u64 = 0;  // bytes_in (TCP -> serial)
+            let mut last_out: u64 = 0; // bytes_out (serial -> TCP)
+            let mut last = std::time::Instant::now();
+            while !stop_for_metrics.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                let now = std::time::Instant::now();
+                let dt = now.duration_since(last).as_secs_f64().max(0.001);
+                last = now;
+                let bi = counters_for_metrics.bytes_in.load(std::sync::atomic::Ordering::Relaxed);
+                let bo = counters_for_metrics.bytes_out.load(std::sync::atomic::Ordering::Relaxed);
+                let outbound = ((bi - last_in) as f64 / dt) as u64; // to serial
+                let inbound = ((bo - last_out) as f64 / dt) as u64;  // from serial
+                last_in = bi;
+                last_out = bo;
+                info!(inbound_bps = inbound, outbound_bps = outbound, "Throughput");
+            }
+        });
+    }
+
     // Serial reader thread: serial -> broadcast
     let shared_state_for_reader = Arc::clone(&shared_state);
     let stop_reader = stop_flag.clone();
@@ -231,12 +255,15 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
         let shared_state_remove = Arc::clone(&shared_state);
         let event_tx_conn = event_tx.clone();
         thread::spawn(move || {
+            // Wait for reader to complete (client closed or error)
             let _ = tcp_reader.join();
-            let _ = tcp_writer.join();
+            // Remove connection immediately so writers drop their sender and exit
             shared_state_remove.remove(&addr);
-            if let Some(tx) = event_tx_conn {
+            if let Some(tx) = &event_tx_conn {
                 let _ = tx.send(format!("Disconnected: {addr}"));
             }
+            // Now wait for writer to finish draining/exit
+            let _ = tcp_writer.join();
             info!(%addr, "Closed connection");
         });
     }
