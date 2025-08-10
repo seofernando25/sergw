@@ -8,12 +8,13 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use crossbeam_channel as channel;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::cli::Listen;
 use crate::serial::{configure_serial, select_serial_port};
 use crate::state::SharedState;
-use crate::tui::{run_tui, Counters};
+use crate::ui::overview::{run_tui, Counters};
+use crate::ui::inspector::{DirectionTag, Sample};
 
 pub fn run_listen(listen: Listen) -> Result<()> {
     let stop_flag = Arc::new(AtomicBool::new(false));
@@ -30,6 +31,9 @@ pub fn run_listen(listen: Listen) -> Result<()> {
 pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool>) -> Result<()> {
     let serial_path = select_serial_port(&listen.serial)?;
     info!(serial = %serial_path, baud = listen.baud, host = %listen.host, "Starting sergw");
+    let (status_tx, status_rx) = channel::unbounded::<String>();
+    let status_tx_reader = status_tx.clone();
+    let status_tx_writer = status_tx.clone();
 
     // Open serial with auto-reconnect loop for writer and reader handles
     let (mut serial_port, mut serial_writer_port) = open_serial_pair(&serial_path, &listen)?;
@@ -42,19 +46,28 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
     let shared_state = Arc::new(SharedState::new());
     let counters = Arc::new(Counters::default());
     let (event_tx_base, event_rx) = channel::unbounded::<String>();
-    let event_tx = if listen.ui { Some(event_tx_base) } else { None };
+    let event_tx = Some(event_tx_base);
 
-    // TUI thread
-    let tui_handle = if listen.ui {
-        let shared_for_tui = Arc::clone(&shared_state);
-        let counters_for_tui = Arc::clone(&counters);
-        let stop_for_tui = stop_flag.clone();
-        Some(thread::spawn(move || {
-            let _ = run_tui(shared_for_tui, counters_for_tui, event_rx, stop_for_tui);
-        }))
-    } else {
-        None
-    };
+    // TUI thread(s)
+    let shared_for_tui = Arc::clone(&shared_state);
+    let counters_for_tui = Arc::clone(&counters);
+    let stop_for_tui = stop_flag.clone();
+    // Inspector UI: channel
+    let (insp_tx, insp_rx) = channel::bounded::<Sample>(1024);
+    let status_rx_tui = status_rx.clone();
+    let tui_handle = Some(thread::spawn(move || {
+        // Merge status messages into events
+        let (tx, merged_rx) = channel::unbounded::<String>();
+        std::thread::spawn(move || loop {
+            crossbeam_channel::select! {
+                recv(event_rx) -> msg => if let Ok(m)=msg { let _=tx.send(m); } else { break; },
+                recv(status_rx_tui) -> msg => if let Ok(m)=msg { let _=tx.send(m); } else { break; },
+            }
+        });
+        let _ = run_tui(shared_for_tui, counters_for_tui, merged_rx, insp_rx, stop_for_tui);
+    }));
+
+    // Inspector receiver is moved into the TUI above; keep tx for sampling below
 
     // Metrics reporter (always on; logs to info every 5 seconds)
     {
@@ -86,6 +99,7 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
     let serial_path_for_reader = serial_path.clone();
     let listen_for_reader = listen.clone();
     let counters_reader = Arc::clone(&counters);
+    let insp_tx_reader = insp_tx.clone();
     let serial_reader = thread::spawn(move || -> Result<()> {
         let mut buffer = vec![0u8; 4096];
         loop {
@@ -93,13 +107,15 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
                 match serial_port.read(&mut buffer) {
                     Ok(n) if n > 0 => {
                         counters_reader.bytes_out.fetch_add(n as u64, Ordering::Relaxed);
+                        let _ = insp_tx_reader.try_send(Sample { dir: DirectionTag::Inbound, data: Bytes::copy_from_slice(&buffer[..n])});
                         let bytes = Bytes::copy_from_slice(&buffer[..n]);
                         shared_state_for_reader.broadcast(bytes);
                     }
                     Ok(_) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                        error!(?e, "Serial broken pipe");
+                    Err(_) if std::io::ErrorKind::BrokenPipe == std::io::ErrorKind::BrokenPipe => {
+                        // Quiet console; send to UI
+                        let _ = status_tx_reader.send("Serial: disconnected, attempting reconnect...".into());
                         break;
                     }
                     Err(e) => {
@@ -115,7 +131,8 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
                     serial_port = sp;
                     // serial writer port is owned by writer thread; we keep only reader here
                     drop(spw);
-                    info!(serial = %serial_path_for_reader, "Reconnected serial (reader)");
+                    // Quiet console; status sent to UI
+                    let _ = status_tx_reader.send("Serial: reconnected (reader)".into());
                 }
                 Err(e) => {
                     warn!(?e, "Reconnect failed (reader), retrying in 1s");
@@ -135,9 +152,10 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
             if stop_writer.load(Ordering::Relaxed) { break; }
             match to_serial_rx.recv_timeout(Duration::from_millis(200)) {
                 Ok(buf) => {
-                    if let Err(e) = serial_writer_port.write_all(&buf) {
-                        warn!(?e, "Error writing to serial");
-                        // try to reconnect serial writer
+                    if let Err(_e) = serial_writer_port.write_all(&buf) {
+                        // Quiet console; status sent to UI
+                        let _ = status_tx_writer.send("Serial: write failed, reconnecting writer...".into());
+                        // try to reconnect serial writer and send a priming \\\n+                        // zero-length write to ensure OS queues are ready
                         loop {
                             if stop_writer.load(Ordering::Relaxed) { return Ok(()); }
                             match open_serial_pair(&serial_path_for_writer, &listen_for_writer) {
@@ -145,7 +163,11 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
                                     // keep writer
                                     serial_writer_port = spw;
                                     drop(sp); // reader will reconnect separately
-                                    info!(serial = %serial_path_for_writer, "Reconnected serial (writer)");
+                                     // Quiet console; status sent to UI
+                                      let _ = status_tx_writer.send("Serial: reconnected (writer)".into());
+                                    // After successful reconnect, retry the buffered write once
+                                    let _ = serial_writer_port.write_all(&buf);
+                                    let _ = serial_writer_port.flush();
                                     break;
                                 }
                                 Err(err) => {
@@ -209,6 +231,7 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
         let stop_conn = stop_flag.clone();
         let reader_addr = addr;
         let counters_in = Arc::clone(&counters);
+        let insp_tx_reader = insp_tx.clone();
         let tcp_reader = thread::spawn(move || -> Result<()> {
             let mut buffer = [0u8; 4096];
             while !stop_conn.load(Ordering::Relaxed) {
@@ -217,6 +240,7 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
                     Ok(n) => {
                         counters_in.bytes_in.fetch_add(n as u64, Ordering::Relaxed);
                         let buf = Bytes::copy_from_slice(&buffer[..n]);
+                        let _ = insp_tx_reader.try_send(Sample { dir: DirectionTag::Outbound(reader_addr), data: buf.clone()});
                         if let Err(e) = to_serial_tx_conn.send(buf) {
                             warn!(?e, "Dropping data to serial, backpressure or shutdown");
                             break;
@@ -278,9 +302,7 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
     }
     shared_state.dispose();
 
-    if let Some(handle) = tui_handle {
-        let _ = handle.join();
-    }
+    if let Some(handle) = tui_handle { let _ = handle.join(); }
 
     Ok(())
 }
@@ -330,7 +352,6 @@ mod itests {
             parity: crate::cli::ParityOpt::None,
             stop_bits: crate::cli::StopBitsOpt::One,
             buffer,
-            ui: false,
         };
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = stop.clone();
@@ -373,3 +394,5 @@ mod itests {
         let _ = handle.join().unwrap();
     }
 }
+
+

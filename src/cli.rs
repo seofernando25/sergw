@@ -65,17 +65,17 @@ pub struct Listen {
     /// Buffer capacity (messages) for internal channels
     #[arg(long, default_value_t = 4096)]
     pub buffer: usize,
-
-    /// Launch terminal user interface
-    #[arg(long)]
-    pub ui: bool,
 }
 
 #[cfg(target_os = "linux")]
 #[derive(Subcommand, Clone, Debug)]
 pub enum MockCmd {
     /// Create a PTY-backed serial device and open a chat UI bound to it
-    Serial,
+    Serial {
+        /// Optionally create a symlink to the slave PTY at this path (cannot force /dev/pts/N)
+        #[arg(long)]
+        alias: Option<String>,
+    },
     /// Open a chat UI connected to a TCP server (replaces `socat - TCP:host:port`)
     Listener {
         #[command(flatten)]
@@ -163,7 +163,6 @@ mod tests {
                 assert!(matches!(l.parity, ParityOpt::None));
                 assert!(matches!(l.stop_bits, StopBitsOpt::One));
                 assert_eq!(l.buffer, 4096);
-                assert!(!l.ui);
             }
             _ => panic!("expected listen"),
         }
@@ -188,7 +187,6 @@ mod tests {
             "two",
             "--buffer",
             "123",
-            "--ui",
         ]);
         match cli.command.unwrap() {
             Commands::Listen(l) => {
@@ -199,7 +197,6 @@ mod tests {
                 assert!(matches!(l.parity, ParityOpt::Even));
                 assert!(matches!(l.stop_bits, StopBitsOpt::Two));
                 assert_eq!(l.buffer, 123);
-                assert!(l.ui);
             }
             _ => panic!("expected listen"),
         }

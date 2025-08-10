@@ -1,13 +1,10 @@
 mod cli;
-mod serial;
-mod server;
-mod state;
-mod tui;
-mod tui_chat;
-mod tui_chat_mock;
 mod metrics;
-#[cfg(target_os = "linux")]
-mod mock;
+mod state;
+mod ui;
+mod net;
+mod serial;
+mod app;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
@@ -15,7 +12,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Cli, Commands, PortsFormat};
 use crate::serial::list_available_ports;
-use crate::server::run_listen;
+use crate::app::listen::run_listen;
 use serialport::SerialPortType;
 
 fn print_ports(all: bool, verbose: bool, format: PortsFormat) {
@@ -82,9 +79,11 @@ fn print_ports(all: bool, verbose: bool, format: PortsFormat) {
 }
 
 fn main() {
+    // Silence external logging to keep TUI clean; route important status via the UI event log.
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)
+        .with_writer(std::io::sink)
         .try_init()
         .ok();
 
@@ -97,8 +96,11 @@ fn main() {
         Some(Commands::Listen(listen)) => run_listen(listen),
         #[cfg(target_os = "linux")]
         Some(Commands::Mock { cmd: sub }) => match sub {
-            crate::cli::MockCmd::Serial => crate::mock::run_mock_serial(),
-            crate::cli::MockCmd::Listener { chat } => crate::tui_chat::run_chat(chat),
+            crate::cli::MockCmd::Serial { alias } => {
+                let _ = alias;
+                crate::app::mock::run_mock_serial()
+            },
+            crate::cli::MockCmd::Listener { chat } => crate::app::listener::run_chat(chat),
         },
         None => {
             Cli::command().print_help().ok();
