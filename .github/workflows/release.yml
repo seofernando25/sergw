@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - 'v*.*.*'
-      - 'sergw-v*.*.*'
 
 jobs:
   publish:
