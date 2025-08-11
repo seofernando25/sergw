@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use thiserror::Error;
 use serialport::{available_ports, SerialPort, SerialPortBuilder, SerialPortInfo, SerialPortType};
+use thiserror::Error;
 
 use crate::cli::Listen;
 
@@ -39,19 +39,18 @@ pub(crate) fn decide_port(explicit: Option<String>, available: Vec<String>) -> R
 
 #[derive(Debug, Error)]
 pub enum SerialSelectError {
-    #[error("No serial ports found. Re-run with --serial <PORT> or use --all in 'ports' to inspect.")]
+    #[error(
+        "No serial ports found. Re-run with --serial <PORT> or use --all in 'ports' to inspect."
+    )]
     NoPorts,
     #[error("Multiple serial ports detected: {list:?}. Please specify --serial <PORT>.")]
     MultiplePorts { list: Vec<String> },
 }
 
-
 pub fn configure_serial(
     builder: SerialPortBuilder,
     listen: &Listen,
-)
-    -> serialport::Result<Box<dyn SerialPort>>
-{
+) -> serialport::Result<Box<dyn SerialPort>> {
     builder
         .data_bits(listen.data_bits.clone().into())
         .parity(listen.parity.clone().into())
@@ -89,5 +88,3 @@ mod tests {
         assert!(err.to_string().contains("Multiple serial ports"));
     }
 }
-
-

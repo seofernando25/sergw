@@ -16,5 +16,3 @@ pub fn create_pty_pair() -> Result<(OwnedFd, OwnedFd, String)> {
     let slave_path = std::fs::read_link(&slave_symlink)?;
     Ok((master, slave, slave_path.to_string_lossy().into_owned()))
 }
-
-

@@ -1,4 +1,7 @@
-use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -15,9 +18,9 @@ use ratatui::{
     Terminal,
 };
 
-use crate::state::SharedState;
-use crate::ui::inspector::{InspectorState, DumpFormat, DeviceId};
 use crate::metrics::ThroughputAverager;
+use crate::state::SharedState;
+use crate::ui::inspector::{DeviceId, DumpFormat, InspectorState};
 
 #[derive(Default)]
 pub struct Counters {
@@ -61,7 +64,7 @@ pub fn run_tui(
         let dt = now.duration_since(last_time).as_secs_f64().max(0.001);
         let bi = counters.bytes_in.load(Ordering::Relaxed);
         let bo = counters.bytes_out.load(Ordering::Relaxed);
-        let tin = avg_out.update(bi - last_in, dt) as u64;   // TCP -> serial (outbound, smoothed)
+        let tin = avg_out.update(bi - last_in, dt) as u64; // TCP -> serial (outbound, smoothed)
         let tout = avg_in.update(bo - last_out, dt) as u64; // serial -> TCP (inbound, smoothed)
         last_in = bi;
         last_out = bo;
@@ -78,13 +81,19 @@ pub fn run_tui(
                         }
                     }
                     crate::ui::inspector::DirectionTag::Outbound(addr) => {
-                        if !insp.devices.iter().any(|d| matches!(d, DeviceId::Client(a) if *a == addr)) {
+                        if !insp
+                            .devices
+                            .iter()
+                            .any(|d| matches!(d, DeviceId::Client(a) if *a == addr))
+                        {
                             insp.devices.push(DeviceId::Client(addr));
                         }
                     }
                 }
                 insp.capture.push_back(s);
-                if insp.capture.len() > 4096 { insp.capture.pop_front(); }
+                if insp.capture.len() > 4096 {
+                    insp.capture.pop_front();
+                }
             }
         }
 
@@ -189,7 +198,8 @@ pub fn run_tui(
         if event::poll(Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
                 if key.code == KeyCode::Char('q')
-                    || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+                    || (key.code == KeyCode::Char('c')
+                        && key.modifiers.contains(KeyModifiers::CONTROL))
                 {
                     stop.store(true, Ordering::Relaxed);
                 } else if key.code == KeyCode::Tab {
@@ -205,24 +215,46 @@ pub fn run_tui(
                     }
                 } else if active_tab == 0 {
                     match key.code {
-                        KeyCode::Up => { log_scroll = log_scroll.saturating_add(1); }
-                        KeyCode::Down => { log_scroll = log_scroll.saturating_sub(1); }
-                        KeyCode::Home => { log_scroll = 0; }
-                        KeyCode::Char('c') => { logs.clear(); log_scroll = 0; }
+                        KeyCode::Up => {
+                            log_scroll = log_scroll.saturating_add(1);
+                        }
+                        KeyCode::Down => {
+                            log_scroll = log_scroll.saturating_sub(1);
+                        }
+                        KeyCode::Home => {
+                            log_scroll = 0;
+                        }
+                        KeyCode::Char('c') => {
+                            logs.clear();
+                            log_scroll = 0;
+                        }
                         _ => {}
                     }
                 } else {
                     match key.code {
                         KeyCode::Char('t') => {
-                            insp.format = match insp.format { DumpFormat::Hex => DumpFormat::Ascii, DumpFormat::Ascii => DumpFormat::Dec, DumpFormat::Dec => DumpFormat::Hex };
+                            insp.format = match insp.format {
+                                DumpFormat::Hex => DumpFormat::Ascii,
+                                DumpFormat::Ascii => DumpFormat::Dec,
+                                DumpFormat::Dec => DumpFormat::Hex,
+                            };
                         }
-                        KeyCode::Char('p') => { insp.paused = !insp.paused; }
-                        KeyCode::Char('c') => { insp.capture.clear(); insp.scroll = 0; }
+                        KeyCode::Char('p') => {
+                            insp.paused = !insp.paused;
+                        }
+                        KeyCode::Char('c') => {
+                            insp.capture.clear();
+                            insp.scroll = 0;
+                        }
                         KeyCode::Up => {
-                            if insp.selected > 0 { insp.selected -= 1; }
+                            if insp.selected > 0 {
+                                insp.selected -= 1;
+                            }
                         }
                         KeyCode::Down => {
-                            if insp.selected + 1 < insp.devices.len() { insp.selected += 1; }
+                            if insp.selected + 1 < insp.devices.len() {
+                                insp.selected += 1;
+                            }
                         }
                         KeyCode::Home => insp.scroll = 0,
                         _ => {}
@@ -237,5 +269,3 @@ pub fn run_tui(
     terminal.show_cursor()?;
     Ok(())
 }
-
-

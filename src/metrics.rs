@@ -5,7 +5,10 @@ pub struct ThroughputAverager {
 
 impl ThroughputAverager {
     pub fn new(tau_secs: f64) -> Self {
-        Self { tau_secs, smoothed_bps: 0.0 }
+        Self {
+            tau_secs,
+            smoothed_bps: 0.0,
+        }
     }
 
     pub fn update(&mut self, bytes_delta: u64, dt_secs: f64) -> f64 {
@@ -32,5 +35,3 @@ mod tests {
         assert!(r2 > 0.0);
     }
 }
-
-

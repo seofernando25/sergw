@@ -18,12 +18,12 @@ pub fn run_mock_serial() -> Result<()> {
 
     struct SymlinkGuard(&'static str);
     impl Drop for SymlinkGuard {
-        fn drop(&mut self) { let _ = std::fs::remove_file(self.0); }
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(self.0);
+        }
     }
     let _guard = SymlinkGuard(alias_path);
 
     run_mock_chat_with_title(master, format!("mock serial | {alias_path}"))?;
     Ok(())
 }
-
-

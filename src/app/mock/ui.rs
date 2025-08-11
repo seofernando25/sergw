@@ -5,10 +5,15 @@ use std::io::{Read, Write};
 #[cfg(target_os = "linux")]
 use std::os::unix::io::OwnedFd;
 #[cfg(target_os = "linux")]
-use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
+};
 #[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "linux")]
+use crate::metrics::ThroughputAverager;
 #[cfg(target_os = "linux")]
 use anyhow::Result;
 #[cfg(target_os = "linux")]
@@ -23,12 +28,10 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    widgets::{Block, Borders, Paragraph, Wrap},
     text::{Line, Span},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Terminal,
 };
-#[cfg(target_os = "linux")]
-use crate::metrics::ThroughputAverager;
 
 #[cfg(target_os = "linux")]
 pub fn run_mock_chat_with_title(master: OwnedFd, title: String) -> Result<()> {
@@ -53,7 +56,9 @@ pub fn run_mock_chat_with_title(master: OwnedFd, title: String) -> Result<()> {
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
         loop {
-            if stop_r.load(Ordering::Relaxed) { break; }
+            if stop_r.load(Ordering::Relaxed) {
+                break;
+            }
             match reader.read(&mut buf) {
                 Ok(0) => std::thread::sleep(Duration::from_millis(20)),
                 Ok(n) => {
@@ -80,7 +85,9 @@ pub fn run_mock_chat_with_title(master: OwnedFd, title: String) -> Result<()> {
     loop {
         while let Ok(line) = log_rx.try_recv() {
             logs.push(line);
-            if logs.len() > 200 { logs.remove(0); }
+            if logs.len() > 200 {
+                logs.remove(0);
+            }
         }
 
         // Throughput
@@ -88,9 +95,11 @@ pub fn run_mock_chat_with_title(master: OwnedFd, title: String) -> Result<()> {
         let dt = now.duration_since(last_time).as_secs_f64().max(0.001);
         let rx = rx_bytes.load(Ordering::Relaxed);
         let tx = tx_bytes.load(Ordering::Relaxed);
-        let inbound = avg_in.update(rx - last_rx, dt) as u64;   // from serial (smoothed)
-        let outbound = avg_out.update(tx - last_tx, dt) as u64;  // to serial (smoothed)
-        last_rx = rx; last_tx = tx; last_time = now;
+        let inbound = avg_in.update(rx - last_rx, dt) as u64; // from serial (smoothed)
+        let outbound = avg_out.update(tx - last_tx, dt) as u64; // to serial (smoothed)
+        last_rx = rx;
+        last_tx = tx;
+        last_time = now;
 
         terminal.draw(|f| {
             let chunks = Layout::default()
@@ -108,21 +117,37 @@ pub fn run_mock_chat_with_title(master: OwnedFd, title: String) -> Result<()> {
             // Auto-scroll: render only the last lines that fit
             let viewport = chunks[1].height.saturating_sub(2) as usize; // minus borders
             let start = logs.len().saturating_sub(viewport);
-            let lines: Vec<Line> = logs.iter().skip(start).map(|l| Line::from(Span::raw(l.clone()))).collect();
-            let para = Paragraph::new(lines).wrap(Wrap { trim: false }).block(Block::default().title("Messages").borders(Borders::ALL));
+            let lines: Vec<Line> = logs
+                .iter()
+                .skip(start)
+                .map(|l| Line::from(Span::raw(l.clone())))
+                .collect();
+            let para = Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .block(Block::default().title("Messages").borders(Borders::ALL));
             f.render_widget(para, chunks[1]);
 
-            let input_box = Paragraph::new(input.clone())
-                .block(Block::default().title("Input (Enter to send, Ctrl+C to quit)").borders(Borders::ALL));
+            let input_box = Paragraph::new(input.clone()).block(
+                Block::default()
+                    .title("Input (Enter to send, Ctrl+C to quit)")
+                    .borders(Borders::ALL),
+            );
             f.render_widget(input_box, chunks[2]);
         })?;
 
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(k) = event::read()? {
                 match k.code {
-                    KeyCode::Char('c') if k.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => break,
+                    KeyCode::Char('c')
+                        if k.modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                    {
+                        break
+                    }
                     KeyCode::Char(c) => input.push(c),
-                    KeyCode::Backspace => { input.pop(); },
+                    KeyCode::Backspace => {
+                        input.pop();
+                    }
                     KeyCode::Enter => {
                         if !input.is_empty() {
                             let mut to_send = input.clone();
@@ -145,5 +170,3 @@ pub fn run_mock_chat_with_title(master: OwnedFd, title: String) -> Result<()> {
     terminal.show_cursor()?;
     Ok(())
 }
-
-

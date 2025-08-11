@@ -1,18 +1,18 @@
+mod app;
 mod cli;
 mod metrics;
-mod state;
-mod ui;
 mod net;
 mod serial;
-mod app;
+mod state;
+mod ui;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
 use tracing_subscriber::EnvFilter;
 
+use crate::app::listen::run_listen;
 use crate::cli::{Cli, Commands, PortsFormat};
 use crate::serial::list_available_ports;
-use crate::app::listen::run_listen;
 use serialport::SerialPortType;
 
 fn print_ports(all: bool, verbose: bool, format: PortsFormat) {
@@ -89,7 +89,11 @@ fn main() {
 
     let cli = Cli::parse();
     let result: Result<()> = match cli.command {
-        Some(Commands::Ports { all, verbose, format }) => {
+        Some(Commands::Ports {
+            all,
+            verbose,
+            format,
+        }) => {
             print_ports(all, verbose, format);
             Ok(())
         }
@@ -99,7 +103,7 @@ fn main() {
             crate::cli::MockCmd::Serial { alias } => {
                 let _ = alias;
                 crate::app::mock::run_mock_serial()
-            },
+            }
             crate::cli::MockCmd::Listener { chat } => crate::app::listener::run_chat(chat),
         },
         None => {
@@ -129,7 +133,8 @@ pub(crate) fn exit_code_for_error(err: &anyhow::Error) -> i32 {
         if let Some(ioe) = cause.downcast_ref::<std::io::Error>() {
             use std::io::ErrorKind::*;
             return match ioe.kind() {
-                AddrInUse | AddrNotAvailable | PermissionDenied | ConnectionAborted | ConnectionReset => 4,
+                AddrInUse | AddrNotAvailable | PermissionDenied | ConnectionAborted
+                | ConnectionReset => 4,
                 _ => 1,
             };
         }
@@ -152,7 +157,9 @@ mod tests {
 
     #[test]
     fn exit_code_multiple_ports() {
-        let err = anyhow::Error::from(crate::serial::SerialSelectError::MultiplePorts { list: vec!["a".into(), "b".into()] });
+        let err = anyhow::Error::from(crate::serial::SerialSelectError::MultiplePorts {
+            list: vec!["a".into(), "b".into()],
+        });
         assert_eq!(exit_code_for_error(&err), 3);
     }
 

@@ -31,8 +31,11 @@ impl SharedState {
     pub fn broadcast(&self, data: Bytes) {
         // Clone senders without holding any global lock; DashMap provides
         // per-bucket locking which is brief during iteration.
-        let snapshot: Vec<(SocketAddr, channel::Sender<Bytes>)> =
-            self.tcp_connections.iter().map(|e| (*e.key(), e.value().clone())).collect();
+        let snapshot: Vec<(SocketAddr, channel::Sender<Bytes>)> = self
+            .tcp_connections
+            .iter()
+            .map(|e| (*e.key(), e.value().clone()))
+            .collect();
 
         let mut to_remove: Vec<SocketAddr> = Vec::new();
         for (addr, tx) in snapshot.into_iter() {

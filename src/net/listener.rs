@@ -1,6 +1,9 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc, Mutex,
+};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -13,8 +16,8 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    widgets::{Block, Borders, Paragraph, Wrap},
     text::{Line, Span},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Terminal,
 };
 
@@ -73,12 +76,21 @@ pub fn run_chat(chat: Chat) -> Result<()> {
         let mut buf = [0u8; 4096];
         while !stop_r.load(Ordering::Relaxed) {
             // lock the stream for this read iteration
-            let mut guard = match rstream.lock() { Ok(g) => g, Err(_) => { std::thread::sleep(Duration::from_millis(50)); continue } };
+            let mut guard = match rstream.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+            };
             match guard.read(&mut buf) {
-                Ok(0) => { // EOF: server closed; reconnect proactively
+                Ok(0) => {
+                    // EOF: server closed; reconnect proactively
                     drop(guard);
                     let new_s = connect(chat.host);
-                    if let Ok(mut g) = rstream.lock() { *g = new_s; }
+                    if let Ok(mut g) = rstream.lock() {
+                        *g = new_s;
+                    }
                     let _ = log_tx_reader.send("! reconnected".to_string());
                     std::thread::sleep(Duration::from_millis(100));
                 }
@@ -88,12 +100,17 @@ pub fn run_chat(chat: Chat) -> Result<()> {
                     let s = String::from_utf8_lossy(&buf[..n]).to_string();
                     let _ = log_tx_reader.send(format!("< {s}"));
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { drop(guard); std::thread::sleep(Duration::from_millis(20)); }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    drop(guard);
+                    std::thread::sleep(Duration::from_millis(20));
+                }
                 Err(_) => {
                     drop(guard);
                     // attempt immediate reconnect and notify
                     let new_s = connect(chat.host);
-                    if let Ok(mut g) = rstream.lock() { *g = new_s; }
+                    if let Ok(mut g) = rstream.lock() {
+                        *g = new_s;
+                    }
                     let _ = log_tx_reader.send("! reconnected".to_string());
                     std::thread::sleep(Duration::from_millis(100));
                 }
@@ -113,7 +130,9 @@ pub fn run_chat(chat: Chat) -> Result<()> {
     loop {
         while let Ok(line) = log_rx.try_recv() {
             logs.push(line);
-            if logs.len() > 200 { logs.remove(0); }
+            if logs.len() > 200 {
+                logs.remove(0);
+            }
         }
 
         // Throughput calc
@@ -121,9 +140,11 @@ pub fn run_chat(chat: Chat) -> Result<()> {
         let dt = now.duration_since(last_time).as_secs_f64().max(0.001);
         let rx = rx_bytes.load(Ordering::Relaxed);
         let tx = tx_bytes.load(Ordering::Relaxed);
-        let inbound = avg_in.update(rx - last_rx, dt) as u64;   // from TCP (smoothed)
+        let inbound = avg_in.update(rx - last_rx, dt) as u64; // from TCP (smoothed)
         let outbound = avg_out.update(tx - last_tx, dt) as u64; // to TCP (smoothed)
-        last_rx = rx; last_tx = tx; last_time = now;
+        last_rx = rx;
+        last_tx = tx;
+        last_time = now;
 
         terminal.draw(|f| {
             let chunks = Layout::default()
@@ -135,27 +156,46 @@ pub fn run_chat(chat: Chat) -> Result<()> {
                 ])
                 .split(f.size());
 
-            let header = Paragraph::new(format!("listener | {} | In: {} B/s Out: {} B/s", chat.host, inbound, outbound));
+            let header = Paragraph::new(format!(
+                "listener | {} | In: {} B/s Out: {} B/s",
+                chat.host, inbound, outbound
+            ));
             f.render_widget(header, chunks[0]);
 
             // Auto-scroll: render only the last lines that fit
             let viewport = chunks[1].height.saturating_sub(2) as usize; // minus borders
             let start = logs.len().saturating_sub(viewport);
-            let lines: Vec<Line> = logs.iter().skip(start).map(|l| Line::from(Span::raw(l.clone()))).collect();
-            let para = Paragraph::new(lines).wrap(Wrap { trim: false }).block(Block::default().title("Messages").borders(Borders::ALL));
+            let lines: Vec<Line> = logs
+                .iter()
+                .skip(start)
+                .map(|l| Line::from(Span::raw(l.clone())))
+                .collect();
+            let para = Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .block(Block::default().title("Messages").borders(Borders::ALL));
             f.render_widget(para, chunks[1]);
 
-            let input_box = Paragraph::new(input.clone())
-                .block(Block::default().title("Input (Enter to send, Ctrl+C to quit)").borders(Borders::ALL));
+            let input_box = Paragraph::new(input.clone()).block(
+                Block::default()
+                    .title("Input (Enter to send, Ctrl+C to quit)")
+                    .borders(Borders::ALL),
+            );
             f.render_widget(input_box, chunks[2]);
         })?;
 
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(k) = event::read()? {
                 match k.code {
-                    KeyCode::Char('c') if k.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => break,
+                    KeyCode::Char('c')
+                        if k.modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                    {
+                        break
+                    }
                     KeyCode::Char(c) => input.push(c),
-                    KeyCode::Backspace => { input.pop(); },
+                    KeyCode::Backspace => {
+                        input.pop();
+                    }
                     KeyCode::Enter => {
                         if !input.is_empty() {
                             let mut to_send = input.clone();
@@ -166,7 +206,9 @@ pub fn run_chat(chat: Chat) -> Result<()> {
                                 if let Ok(Some(_)) = g.take_error() {
                                     // immediate reconnect if socket error present
                                     let new_s = connect(chat.host);
-                                    if let Ok(mut gg) = stream.lock() { *gg = new_s; }
+                                    if let Ok(mut gg) = stream.lock() {
+                                        *gg = new_s;
+                                    }
                                 }
                                 wrote = try_send(&mut g, to_send.as_bytes());
                                 if !wrote {
@@ -176,9 +218,13 @@ pub fn run_chat(chat: Chat) -> Result<()> {
                             if !wrote {
                                 // reconnect and retry once
                                 let new_s = connect(chat.host);
-                                if let Ok(mut g) = stream.lock() { *g = new_s; }
                                 if let Ok(mut g) = stream.lock() {
-                                    if let Some(prev) = &last_sent { let _ = try_send(&mut g, prev.as_slice()); }
+                                    *g = new_s;
+                                }
+                                if let Ok(mut g) = stream.lock() {
+                                    if let Some(prev) = &last_sent {
+                                        let _ = try_send(&mut g, prev.as_slice());
+                                    }
                                     std::thread::sleep(Duration::from_millis(150));
                                     wrote = try_send(&mut g, to_send.as_bytes());
                                 }
@@ -204,5 +250,3 @@ pub fn run_chat(chat: Chat) -> Result<()> {
     terminal.show_cursor()?;
     Ok(())
 }
-
-
