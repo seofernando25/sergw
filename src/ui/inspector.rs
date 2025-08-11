@@ -62,7 +62,7 @@ pub fn dump_bytes(buf: &[u8], fmt: DumpFormat, max: usize) -> String {
 
 // Utility to produce list items for rendering inside a List with a Block around it.
 #[allow(dead_code)]
-pub fn inspector_items(state: &InspectorState, viewport_lines: usize) -> Vec<ListItem> {
+pub fn inspector_items(state: &InspectorState, viewport_lines: usize) -> Vec<ListItem<'_>> {
     let filter = state.devices.get(state.selected);
     let lines: Vec<String> = state.capture.iter().filter_map(|s| {
         let dev = match s.dir { DirectionTag::Inbound => DeviceId::Serial, DirectionTag::Outbound(a) => DeviceId::Client(a) };
