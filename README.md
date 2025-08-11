@@ -1,128 +1,101 @@
-# sergw — Simple Serial ↔ TCP Gateway
+### sergw
 
-A small utility that bridges a serial port to a TCP socket. It exposes the serial port as a TCP server: any connected TCP client receives bytes read from the serial port, and bytes written by a client are forwarded to the serial port.
+Simple serial ↔ TCP gateway with a built‑in TUI and optional zero‑config mDNS advertisement.
 
-## Features
+sergw opens a local serial device and serves it over TCP, broadcasting serial output to all connected clients and forwarding client input to the serial device. It emphasizes pragmatic reliability (auto‑reconnect) and visibility (TUI overview and hex/ascii/dec inspector).
 
-- Auto-detect serial port when exactly one is available (or require `--serial`)
-- Configurable baud, data bits, parity, stop bits
-- Type-safe TCP bind address (`--host`) with sensible default
-- Concurrency-safe design: single serial reader, single serial writer
-- Backpressure via bounded channels; slow TCP writers are dropped
-- Graceful shutdown on Ctrl-C
-- Structured logs via `tracing`
-- Auto-reconnect for serial port on errors (1s retry)
-- Non-blocking accept and shutdown-aware loops
-- Stable exit codes for common failure modes
-- Machine-readable output for `ports` (`--format json`)
+### Highlights
 
-## Install
+- Serial ↔ TCP bridge over raw TCP (no telnet/RFC2217, no TLS)
+- Multi‑client fan‑out: serial output is broadcast to all connected TCP clients
+- Backpressure handling: slow or disconnected clients are dropped
+- TUI: overview (connections, throughput, events) and inspector (hex/ascii/dec)
+- Auto‑reconnect for serial (reader/writer) with buffered retry for writes
+- Zero‑config mDNS (feature ‘mdns’, enabled by default): `_sergw._tcp`
+- Linux mock tools: PTY‑backed mock serial and TCP chat helper (Linux only)
 
-- Build locally:
+### Install
 
-```bash
-cargo build --release
+- From crates.io (default features include mDNS):
+
+```
+cargo install sergw
 ```
 
-- Or install to cargo bin:
+- Without mDNS:
 
-```bash
-cargo install --path . --locked
+```
+cargo install sergw --no-default-features
 ```
 
-## Usage
+### Quick start
 
-- List ports (USB only by default):
+Bridge a serial device on port 5656 (defaults shown):
 
-```bash
-sergw ports
-sergw ports --verbose
-sergw ports --all --verbose
-sergw ports --format json
+```
+sergw listen --serial /dev/ttyUSB0 --baud 115200 --host 127.0.0.1:5656
 ```
 
-- Listen (auto-pick serial if only one is present):
+Connect a TCP client (e.g. `nc 127.0.0.1 5656`) to interact.
 
-```bash
-sergw listen --baud 115200 --host 127.0.0.1:5656
+### CLI
+
+```
+sergw
+  ports [--all] [--verbose] [--format text|json]
+  listen [--serial <PATH>] [--baud <u32>] [--host <addr:port>]
+         [--data-bits five|six|seven|eight]
+         [--parity none|odd|even]
+         [--stop-bits one|two]
+         [--buffer <usize>]
+  mock serial [--alias <PATH>]           # Linux only
+  mock listener [--host <addr:port>]     # Linux only
 ```
 
-- Listen with explicit serial:
+- `ports`: list serial ports (USB‑only by default). Use `--all` to include non‑USB. `--format json` for machine output.
+- `listen`: start the bridge. If `--serial` is omitted and exactly one USB serial is present, it is auto‑selected; otherwise a helpful error is returned.
+- `mock serial` (Linux): create a PTY that behaves like a serial device and open a TUI to interact.
+- `mock listener` (Linux): connect to a TCP server with a TUI (handy for testing the bridge from the client side).
 
-```bash
-sergw listen --serial /dev/ttyUSB0 --baud 115200 --host 0.0.0.0:5656
+### mDNS / Bonjour (optional)
+
+When built with the `mdns` feature (default), sergw advertises the service using type `_sergw._tcp`.
+
+- Instance name: `sergw:<ttyname>` (e.g. `sergw:ttyUSB0`)
+- TXT records: `provider=sergw`
+
+Disable mDNS by building without default features:
+
+```
+cargo build --no-default-features
 ```
 
-- Serial settings examples:
+### TUI overview
 
-```bash
-sergw listen --serial /dev/ttyUSB0 --baud 57600 --data-bits eight --parity none --stop-bits one
-```
+- Tabs: Overview (connections, throughput, events), Inspector (live dump)
+- Inspector: formats (hex/ascii/dec), per‑device filter, pause/scroll
+- Key hints in footer
 
-- Buffer sizing (messages per channel):
+### Reliability & behavior
 
-```bash
-sergw listen --buffer 8192
-```
+- Serial auto‑reconnect on read/write failures; writer retries buffered write after reconnect
+- TCP reader/writer per connection; on backpressure the connection is dropped rather than slowing others
+- Raw byte forwarding (no framing, no higher protocols)
 
-Enable logs with `RUST_LOG` (examples). Logs go to stderr; command outputs (like `ports`) go to stdout:
+### Exit codes
 
-```bash
-RUST_LOG=info sergw listen --serial /dev/ttyUSB0
-RUST_LOG=debug,sergw=trace sergw ports --verbose
-```
+- 2: no serial ports found for auto‑selection
+- 3: multiple serial ports detected, explicit `--serial` required
+- 4: bind‑like networking error (e.g. address in use)
+- 5: serial open/error
+- 1: other errors
 
-## Makefile
+### Development
 
-Common developer commands are available:
+- Build: `cargo build --all-features`
+- Lint: `cargo clippy --all-targets --all-features -- -D warnings`
+- Tests: unit tests + Linux PTY integration test
 
-```bash
-make help
-```
+### License
 
-Key targets:
-- `make build` / `make release`
-- `make test` / `make clippy` / `make fmt`
-- `make ports`
-- `make listen SERIAL=/dev/ttyUSB0 BAUD=115200 HOST=127.0.0.1:5656`
-
-## Architecture (short)
-
-- One thread reads from the serial port and broadcasts to all TCP clients
-- One thread serializes writes from all TCP clients to the serial port
-- Per-connection threads forward TCP->serial and broadcast serial->TCP
-- Backpressure is enforced using bounded channels (slow clients get dropped)
-
-## Notes and Limitations
-
-- No framing or protocol translation: raw bytes are forwarded as-is
-- No authentication or encryption on the TCP side (consider using TLS/SSH)
-- Built-in serial auto-reconnect retries every 1s without backoff
-
-## Systemd (example)
-
-```ini
-[Unit]
-Description=sergw Serial to TCP Gateway
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/sergw listen --serial /dev/ttyUSB0 --baud 115200 --host 0.0.0.0:5656
-Restart=on-failure
-Environment=RUST_LOG=info
-
-[Install]
-WantedBy=multi-user.target
-```
-
-## License
-
-GPL-3.0-or-later. See `LICENSE`.
-
-## Architectures
-
-Built and tested on Linux. The project is architecture-agnostic and should
-work on common Linux architectures supported by Rust, including `x86_64`,
-`aarch64` (e.g., Raspberry Pi 4/5), `armv7h` (e.g., Raspberry Pi 2/3), and
-`i686`. The Arch Linux PKGBUILD declares these architectures.
+GPL‑3.0‑or‑later

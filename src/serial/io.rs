@@ -49,7 +49,9 @@ pub enum SerialSelectError {
 pub fn configure_serial(
     builder: SerialPortBuilder,
     listen: &Listen,
-) -> serialport::Result<Box<dyn SerialPort>> {
+)
+    -> serialport::Result<Box<dyn SerialPort>>
+{
     builder
         .data_bits(listen.data_bits.clone().into())
         .parity(listen.parity.clone().into())
@@ -87,3 +89,5 @@ mod tests {
         assert!(err.to_string().contains("Multiple serial ports"));
     }
 }
+
+
