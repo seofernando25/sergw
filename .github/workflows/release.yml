@@ -18,6 +18,8 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Install system deps
         run: |
@@ -34,7 +36,8 @@ jobs:
         id: ver
         run: |
           TAG="${GITHUB_REF##*/}"
-          TAG_STRIPPED="${TAG#v}"
+          TAG_STRIPPED="${TAG#sergw-}"
+          TAG_STRIPPED="${TAG_STRIPPED#v}"
           PKG_VER=$(sed -n 's/^version\s*=\s*"\([^"]\+\)"/\1/p' Cargo.toml | head -n1)
           echo "tag=$TAG_STRIPPED" >> $GITHUB_OUTPUT
           echo "pkg=$PKG_VER" >> $GITHUB_OUTPUT
