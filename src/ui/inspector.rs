@@ -3,18 +3,28 @@ use std::net::SocketAddr;
 // no time imports needed here
 
 use bytes::Bytes;
-use ratatui::widgets::{ListItem, Paragraph, Wrap};
-use ratatui::text::{Line, Span};
 use ratatui::layout::Rect;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, Wrap};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DirectionTag { Inbound, Outbound(SocketAddr) }
+pub enum DirectionTag {
+    Inbound,
+    Outbound(SocketAddr),
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum DeviceId { Serial, Client(SocketAddr) }
+pub enum DeviceId {
+    Serial,
+    Client(SocketAddr),
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DumpFormat { Hex, Ascii, Dec }
+pub enum DumpFormat {
+    Hex,
+    Ascii,
+    Dec,
+}
 
 #[derive(Clone, Debug)]
 pub struct Sample {
@@ -51,8 +61,14 @@ pub fn dump_bytes(buf: &[u8], fmt: DumpFormat, max: usize) -> String {
         DumpFormat::Ascii => {
             let mut s = String::new();
             for &b in slice {
-                if b == b'\n' || b == b'\r' { continue; }
-                if b.is_ascii_graphic() || b == b' ' { s.push(b as char); } else { s.push('.'); }
+                if b == b'\n' || b == b'\r' {
+                    continue;
+                }
+                if b.is_ascii_graphic() || b == b' ' {
+                    s.push(b as char);
+                } else {
+                    s.push('.');
+                }
             }
             s
         }
@@ -60,39 +76,36 @@ pub fn dump_bytes(buf: &[u8], fmt: DumpFormat, max: usize) -> String {
     }
 }
 
-// Utility to produce list items for rendering inside a List with a Block around it.
-#[allow(dead_code)]
-pub fn inspector_items(state: &InspectorState, viewport_lines: usize) -> Vec<ListItem<'_>> {
-    let filter = state.devices.get(state.selected);
-    let lines: Vec<String> = state.capture.iter().filter_map(|s| {
-        let dev = match s.dir { DirectionTag::Inbound => DeviceId::Serial, DirectionTag::Outbound(a) => DeviceId::Client(a) };
-        if let Some(sel) = filter { if &dev != sel { return None; } }
-        Some(dump_bytes(&s.data, state.format, 256))
-    }).collect();
-    if state.scroll > 0 { let _ = &lines; }
-    let start = lines.len().saturating_sub(viewport_lines + state.scroll);
-    lines.iter().skip(start).take(viewport_lines).map(|l| ListItem::new(l.clone())).collect()
-}
-
 // Render wrapped text for inspector messages. Returns a Paragraph with Wrap enabled.
 pub fn inspector_paragraph(state: &InspectorState, area: Rect) -> Paragraph<'static> {
     let filter = state.devices.get(state.selected);
     // Build lines as strings first
-    let lines: Vec<String> = state.capture.iter().filter_map(|s| {
-        let dev = match s.dir { DirectionTag::Inbound => DeviceId::Serial, DirectionTag::Outbound(a) => DeviceId::Client(a) };
-        if let Some(sel) = filter { if &dev != sel { return None; } }
-        Some(dump_bytes(&s.data, state.format, 4096))
-    }).collect();
+    let lines: Vec<String> = state
+        .capture
+        .iter()
+        .filter_map(|s| {
+            let dev = match s.dir {
+                DirectionTag::Inbound => DeviceId::Serial,
+                DirectionTag::Outbound(a) => DeviceId::Client(a),
+            };
+            if let Some(sel) = filter {
+                if &dev != sel {
+                    return None;
+                }
+            }
+            Some(dump_bytes(&s.data, state.format, 4096))
+        })
+        .collect();
 
-    if state.scroll > 0 { let _ = &lines; }
-    let start = lines.len().saturating_sub(area.height.saturating_sub(2) as usize + state.scroll);
+    if state.scroll > 0 {
+        let _ = &lines;
+    }
+    let start = lines
+        .len()
+        .saturating_sub(area.height.saturating_sub(2) as usize + state.scroll);
     let visible = lines.into_iter().skip(start);
 
-    let text_lines: Vec<Line> = visible
-        .map(|s| Line::from(Span::raw(s)))
-        .collect();
+    let text_lines: Vec<Line> = visible.map(|s| Line::from(Span::raw(s))).collect();
 
     Paragraph::new(text_lines).wrap(Wrap { trim: false })
 }
-
-
