@@ -79,15 +79,30 @@ fn print_ports(all: bool, verbose: bool, format: PortsFormat) {
 }
 
 fn main() {
-    // Silence external logging to keep TUI clean; route important status via the UI event log.
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_target(false)
-        .with_writer(std::io::sink)
-        .try_init()
-        .ok();
-
     let cli = Cli::parse();
+
+    let no_tui = match &cli.command {
+        Some(Commands::Listen(listen)) => listen.no_tui,
+        _ => false,
+    };
+
+    if no_tui {
+        // Enable normal external logging for background daemon
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_target(false)
+            .try_init()
+            .ok();
+    } else {
+        // Silence external logging to keep TUI clean; route important status via the UI event log.
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_target(false)
+            .with_writer(std::io::sink)
+            .try_init()
+            .ok();
+    }
+
     let result: Result<()> = match cli.command {
         Some(Commands::Ports {
             all,

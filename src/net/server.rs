@@ -57,23 +57,28 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
     // Inspector UI: channel
     let (insp_tx, insp_rx) = channel::bounded::<Sample>(1024);
     let status_rx_tui = status_rx.clone();
-    let tui_handle = Some(thread::spawn(move || {
-        // Merge status messages into events
-        let (tx, merged_rx) = channel::unbounded::<String>();
-        std::thread::spawn(move || loop {
-            crossbeam_channel::select! {
-                recv(event_rx) -> msg => if let Ok(m)=msg { let _=tx.send(m); } else { break; },
-                recv(status_rx_tui) -> msg => if let Ok(m)=msg { let _=tx.send(m); } else { break; },
-            }
-        });
-        let _ = run_tui(
-            shared_for_tui,
-            counters_for_tui,
-            merged_rx,
-            insp_rx,
-            stop_for_tui,
-        );
-    }));
+    let tui_handle = if listen.no_tui {
+        None
+    } else {
+        Some(thread::spawn(move || {
+            // Merge status messages into events
+            let (tx, merged_rx) = channel::unbounded::<String>();
+            let status_rx_tui_clone = status_rx_tui.clone();
+            std::thread::spawn(move || loop {
+                crossbeam_channel::select! {
+                    recv(event_rx) -> msg => if let Ok(m)=msg { let _=tx.send(m); } else { break; },
+                    recv(status_rx_tui_clone) -> msg => if let Ok(m)=msg { let _=tx.send(m); } else { break; },
+                }
+            });
+            let _ = run_tui(
+                shared_for_tui,
+                counters_for_tui,
+                merged_rx,
+                insp_rx,
+                stop_for_tui,
+            );
+        }))
+    };
 
     // Inspector receiver is moved into the TUI above; keep tx for sampling below
 
@@ -131,7 +136,7 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
                     Ok(_) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
                     Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                        // Quiet console; send to UI
+                        warn!("Serial: disconnected (BrokenPipe), attempting reconnect...");
                         let _ = status_tx_reader
                             .send("Serial: disconnected, attempting reconnect...".into());
                         break;
@@ -174,11 +179,12 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
             }
             match to_serial_rx.recv_timeout(Duration::from_millis(200)) {
                 Ok(buf) => {
-                    if let Err(_e) = serial_writer_port.write_all(&buf) {
-                        // Quiet console; status sent to UI
+                    if let Err(e) = serial_writer_port.write_all(&buf) {
+                        warn!(?e, "Serial: write failed, reconnecting writer...");
                         let _ = status_tx_writer
                             .send("Serial: write failed, reconnecting writer...".into());
-                        // try to reconnect serial writer and send a priming \\\n+                        // zero-length write to ensure OS queues are ready
+                        // try to reconnect serial writer and send a priming
+                        // zero-length write to ensure OS queues are ready
                         loop {
                             if stop_writer.load(Ordering::Relaxed) {
                                 return Ok(());
@@ -276,14 +282,18 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
         // Register connection for broadcasts
         shared_state.insert(addr, to_tcp_tx);
 
+        // Introduce connection-specific stop flag to cleanly tear down both threads if either fails
+        let conn_stop = Arc::new(AtomicBool::new(false));
+
         // TCP reader: TCP -> to_serial
         let stop_conn = stop_flag.clone();
+        let conn_stop_reader = conn_stop.clone();
         let reader_addr = addr;
         let counters_in = Arc::clone(&counters);
         let insp_tx_reader = insp_tx.clone();
         let tcp_reader = thread::spawn(move || -> Result<()> {
             let mut buffer = [0u8; 4096];
-            while !stop_conn.load(Ordering::Relaxed) {
+            while !stop_conn.load(Ordering::Relaxed) && !conn_stop_reader.load(Ordering::Relaxed) {
                 match stream_reader.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(n) => {
@@ -298,21 +308,26 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
                             break;
                         }
                     }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        // Prevent 100% CPU busy loop
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
                     Err(e) => {
                         warn!(?e, addr = %reader_addr, "TCP read error");
                         break;
                     }
                 }
             }
+            conn_stop_reader.store(true, Ordering::Relaxed);
             Ok(())
         });
 
         // TCP writer: from broadcast -> TCP
         let stop_conn = stop_flag.clone();
+        let conn_stop_writer = conn_stop.clone();
         let writer_addr = addr;
         let tcp_writer = thread::spawn(move || -> Result<()> {
-            while !stop_conn.load(Ordering::Relaxed) {
+            while !stop_conn.load(Ordering::Relaxed) && !conn_stop_writer.load(Ordering::Relaxed) {
                 match to_tcp_rx.recv_timeout(Duration::from_millis(200)) {
                     Ok(buf) => {
                         if let Err(e) = stream_writer.write_all(&buf) {
@@ -324,15 +339,19 @@ pub(crate) fn run_listen_with_shutdown(listen: Listen, stop_flag: Arc<AtomicBool
                     Err(_e) => break,
                 }
             }
+            conn_stop_writer.store(true, Ordering::Relaxed);
             Ok(())
         });
 
         // Detach a supervisor for the connection
         let shared_state_remove = Arc::clone(&shared_state);
         let event_tx_conn = event_tx.clone();
+        let conn_stop_supervisor = conn_stop.clone();
         thread::spawn(move || {
             // Wait for reader to complete (client closed or error)
             let _ = tcp_reader.join();
+            // Stop writer thread immediately
+            conn_stop_supervisor.store(true, Ordering::Relaxed);
             // Remove connection immediately so writers drop their sender and exit
             shared_state_remove.remove(&addr);
             if let Some(tx) = &event_tx_conn {
@@ -413,6 +432,7 @@ mod itests {
             parity: crate::cli::ParityOpt::None,
             stop_bits: crate::cli::StopBitsOpt::One,
             buffer,
+            no_tui: true,
         };
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = stop.clone();

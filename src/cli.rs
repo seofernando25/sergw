@@ -65,6 +65,10 @@ pub struct Listen {
     /// Buffer capacity (messages) for internal channels
     #[arg(long, default_value_t = 4096)]
     pub buffer: usize,
+
+    /// Run without the TUI (daemon mode, logs output to stderr)
+    #[arg(long)]
+    pub no_tui: bool,
 }
 
 #[cfg(target_os = "linux")]
@@ -163,6 +167,7 @@ mod tests {
                 assert!(matches!(l.parity, ParityOpt::None));
                 assert!(matches!(l.stop_bits, StopBitsOpt::One));
                 assert_eq!(l.buffer, 4096);
+                assert!(!l.no_tui);
             }
             _ => panic!("expected listen"),
         }
@@ -187,6 +192,7 @@ mod tests {
             "two",
             "--buffer",
             "123",
+            "--no-tui",
         ]);
         match cli.command.unwrap() {
             Commands::Listen(l) => {
@@ -197,6 +203,7 @@ mod tests {
                 assert!(matches!(l.parity, ParityOpt::Even));
                 assert!(matches!(l.stop_bits, StopBitsOpt::Two));
                 assert_eq!(l.buffer, 123);
+                assert!(l.no_tui);
             }
             _ => panic!("expected listen"),
         }

@@ -190,7 +190,7 @@ pub fn run_tui(
             let footer = if active_tab == 0 {
                 Paragraph::new("Tab: inspector | q: quit | ↑/↓/Home: scroll events | c: clear events")
             } else {
-                Paragraph::new("Tab: overview | q: quit | t: toggle type | p: pause/resume | ↑/↓: select device | Home: top | c: clear")
+                Paragraph::new("Tab: overview | q: quit | t: toggle type | p: pause/resume | ↑/↓: select device | PgUp/PgDn: scroll | Home: top | c: clear")
             };
             f.render_widget(footer, outer[2]);
         })?;
@@ -255,6 +255,15 @@ pub fn run_tui(
                             if insp.selected + 1 < insp.devices.len() {
                                 insp.selected += 1;
                             }
+                        }
+                        KeyCode::PageUp => {
+                            let limit = insp.capture.len();
+                            if insp.scroll < limit {
+                                insp.scroll = insp.scroll.saturating_add(5);
+                            }
+                        }
+                        KeyCode::PageDown => {
+                            insp.scroll = insp.scroll.saturating_sub(5);
                         }
                         KeyCode::Home => insp.scroll = 0,
                         _ => {}
